@@ -1,0 +1,21 @@
+# Rustfmt 配置 - Crab-Keeper 项目
+# 仅使用 stable 通道支持的选项
+
+# 基础风格
+edition = "2024"
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+
+# 导入排序
+reorder_imports = true
+reorder_modules = true
+
+# 表达式与结构体
+use_small_heuristics = "Max"
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# 格式化细节
+match_block_trailing_comma = true
+newline_style = "Unix"

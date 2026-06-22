@@ -1,0 +1,4 @@
+# Clippy 配置 - Crab-Keeper 项目
+
+# 允许的 lint 级别阈值
+cognitive-complexity-threshold = 25

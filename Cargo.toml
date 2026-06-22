@@ -1,0 +1,63 @@
+[package]
+name = "crab-keeper"
+version = "0.1.0"
+edition = "2024"
+description = "一个使用 Rust 实现的分布式协调服务，设计灵感源自 Apache ZooKeeper"
+authors = ["hesse"]
+license = "Apache-2.0"
+repository = "https://github.com/hesse/crab-keeper"
+
+[dependencies]
+
+[dev-dependencies]
+# 测试框架扩展 (可选，按需添加)
+# proptest = "1"
+# mockall = "0.13"
+# tempfile = "3"
+
+[profile.dev]
+# 开发模式下启用一些优化，加速编译
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.test]
+# 测试模式下启用 debug 断言
+opt-level = 0
+debug = true
+debug-assertions = true
+
+[lints.rust]
+# 禁止使用 unsafe 代码 (分布式系统对安全性要求高)
+unsafe_code = "forbid"
+# 缺失文档警告 (鼓励为公共 API 编写文档)
+missing_docs = "warn"
+# 未使用变量/函数警告
+unused = { level = "warn", priority = -1 }
+# 非蛇形命名警告 (但允许某些场景)
+non_snake_case = "warn"
+# 死代码检查
+dead_code = { level = "warn", priority = -1 }
+
+[lints.clippy]
+# 所有 clippy 警告
+all = { level = "warn", priority = -1 }
+# 禁止 dbg! 宏 (使用 tracing/log 代替)
+dbg_macro = "forbid"
+# 禁止直接打印到 stdout/stderr
+print_stdout = "warn"
+print_stderr = "warn"
+# 禁止 todo! 宏进入生产代码
+todo = "warn"
+# 复杂度过高警告
+cognitive_complexity = "warn"
+# 不必要的克隆
+cloned_instead_of_copied = "warn"
+# 不必要的 collect
+needless_collect = "warn"
+# 不必要的 &String 参数
+ptr_arg = "warn"
