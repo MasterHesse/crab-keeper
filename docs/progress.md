@@ -8,8 +8,8 @@
 
 | 阶段 | 名称 | 核心任务 | 测试用例 | 预计工期 | 状态 |
 |------|------|---------|---------|---------|------|
-| P1 | 初识分布式通信 | 实现 parent_work / child_work 函数，完成进程启动（STARTED）与结束（DONE）同步；建立消息收发机制 | `test_process_start_sync`、`test_process_done_sync`、`test_message_send_recv` | - | 🔵 当前阶段 |
-| P2 | 分布式银行系统 | 实现跨进程资金转账功能；保证转账原子性与一致性；引入 get_physical_time 模拟物理时间 | `test_transfer_atomicity`、`test_balance_consistency`、`test_cross_branch_transfer` | - | 未开始 |
+| P1 | 初识分布式通信 | 实现 parent_work / child_work 函数，完成进程启动（STARTED）与结束（DONE）同步；建立消息收发机制 | `test_process_start_sync`、`test_process_done_sync`、`test_message_send_recv` | - | ✅ 已完成 |
+| P2 | 分布式银行系统 | 实现跨进程资金转账功能；保证转账原子性与一致性；引入 get_physical_time 模拟物理时间 | `test_transfer_atomicity`、`test_balance_consistency`、`test_cross_branch_transfer` | - | 🔵 当前阶段 |
 | P3 | Lamport 逻辑时钟 | 实现 Lamport 逻辑时钟算法；为每个消息事件分配逻辑时间戳；修正阶段二中物理时钟导致的潜在状态不一致 | `test_logical_clock_increment`、`test_event_timestamp_ordering`、`test_clock_sync_on_receive` | - | 未开始 |
 | P4 | 分布式互斥算法 | 实现 Ricart-Agrawala 算法；多进程竞争临界区以安全调用 print 函数；综合运用通信、协调与逻辑时钟 | `test_cs_enter_exclusive`、`test_cs_release`、`test_request_queue_priority`、`test_multi_process_cs` | - | 未开始 |
 
@@ -33,10 +33,10 @@
 
 ### 2.1 当前进度总览
 
-- **当前阶段**：P1 (初识分布式通信)
-- **已完成阶段**：P0
+- **当前阶段**：P2 (分布式银行系统)
+- **已完成阶段**：P0, P1
 - **进行中阶段**：无
-- **完成度**：1 / 10
+- **完成度**：2 / 10
 
 ### 2.2 各阶段详细进度
 
@@ -54,11 +54,29 @@
 
 | 任务 | 预计工时 | 实际用时 | 状态 |
 |------|---------|---------|------|
-| 编写同步测试用例 (STARTED/DONE) | - | - | 未开始 |
-| 实现 parent_work 函数 | - | - | 未开始 |
-| 实现 child_work 函数 | - | - | 未开始 |
-| 实现消息发送/接收原语 | - | - | 未开始 |
-| 测试通过验证 | - | - | 未开始 |
+| 编写同步测试用例 (STARTED/DONE) | - | - | ✅ 已完成 |
+| 实现 Message 序列化/反序列化 (to_bytes / from_bytes) | - | - | ✅ 已完成 |
+| 实现 TCP 消息收发原语 (send_message / recv_message) | - | - | ✅ 已完成 |
+| 实现 parent_work 函数 (7 阶段协调逻辑) | - | - | ✅ 已完成 |
+| 实现 child_work 函数 (STARTED → 工作 → DONE) | - | - | ✅ 已完成 |
+| 单元测试通过验证 (11/11) | - | - | ✅ 已完成 |
+| CLI main.rs 入口 (父/子进程模式切换) | - | - | ✅ 已完成 |
+| Clippy 零警告验证 | - | - | ✅ 已完成 |
+
+**模块结构：**
+
+```
+src/communication/
+├── mod.rs         # 模块入口与公共导出
+├── message.rs     # Message 枚举 + to_bytes / from_bytes (TLV 协议)
+├── channel.rs     # send_message / recv_message (长度前缀分帧)
+└── process.rs     # parent_work / child_work (分布式同步)
+```
+
+**通信协议：**
+
+- **消息层 (TLV):** tag(1B) + payload_len(8B 大端 u64) + payload(变长)
+- **传输层 (分帧):** frame_len(8B 大端 u64) + message_bytes(变长)
 
 #### P2 - 分布式银行系统
 

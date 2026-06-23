@@ -8,6 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/hesse/crab-keeper"
 
 [dependencies]
+anyhow = "1.0.50"
 
 [dev-dependencies]
 # 测试框架扩展 (可选，按需添加)
