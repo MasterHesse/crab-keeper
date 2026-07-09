@@ -174,7 +174,7 @@ pub fn print_child_banner(id: usize, parent_addr: &str) {
 #[allow(clippy::items_after_test_module)]
 mod process_tests {
     use super::*;
-    use crate::banking::types::{AccountId, Balance, TransferOrder};
+    use crate::banking::types::{AccountId, Balance, BalanceHistory, TransferOrder};
     use crate::communication::Message;
     use std::io;
     use std::net::TcpStream;
@@ -278,7 +278,7 @@ mod process_tests {
     ) -> io::Result<()> {
         use crate::banking::account::BranchAccount;
         use crate::banking::time::PhysicalClock;
-        use crate::banking::types::{BalanceHistory, TransferOrder};
+        use crate::banking::types::TransferOrder;
 
         // Phase 1: STARTED
         send_message(&mut stream, &Message::Started)?;
