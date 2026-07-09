@@ -44,7 +44,7 @@ use std::process::{Child, Command, Stdio};
 use crab_keeper::banking::account::BranchAccount;
 use crab_keeper::banking::time::PhysicalClock;
 use crab_keeper::banking::types::{AccountId, Balance, BalanceHistory, TransferOrder};
-use crab_keeper::communication::{recv_message, send_message, Message};
+use crab_keeper::communication::{Message, recv_message, send_message};
 use std::thread;
 
 /// 在后台启动一个 crab-keeper 子进程，以银行模式运行（备用，当前测试使用线程模拟）。
@@ -83,28 +83,22 @@ fn simulate_banking_child(
             let msg = recv_message(&mut stream).map_err(|e| e.to_string())?;
             match msg {
                 Message::Transfer(ref payload) => {
-                    let order =
-                        TransferOrder::from_bytes(payload).map_err(|e| e.to_string())?;
+                    let order = TransferOrder::from_bytes(payload).map_err(|e| e.to_string())?;
                     let now = clock.now();
 
                     if order.src == child_id {
-                        account
-                            .debit(order.amount, now)
-                            .map_err(|e| e.to_string())?;
+                        account.debit(order.amount, now).map_err(|e| e.to_string())?;
                         // 将 TRANSFER 发回给父进程（父进程作为中继）
                         send_message(&mut stream, &Message::Transfer(payload.clone()))
                             .map_err(|e| e.to_string())?;
                     }
                     if order.dst == child_id {
-                        account
-                            .credit(order.amount, now)
-                            .map_err(|e| e.to_string())?;
-                        send_message(&mut stream, &Message::Ack)
-                            .map_err(|e| e.to_string())?;
+                        account.credit(order.amount, now).map_err(|e| e.to_string())?;
+                        send_message(&mut stream, &Message::Ack).map_err(|e| e.to_string())?;
                     }
-                }
+                },
                 Message::Stop => break,
-                _ => {}
+                _ => {},
             }
         }
 
@@ -148,7 +142,7 @@ fn collect_done_and_histories(streams: &mut [TcpStream]) -> Vec<BalanceHistory> 
                 let h = BalanceHistory::from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("解析子进程 {i} 历史失败: {e}"));
                 histories.push(h);
-            }
+            },
             other => panic!("子进程 {i} 期望 BALANCE_HISTORY，收到 {}", other),
         }
     }
@@ -296,9 +290,8 @@ fn test_balance_consistency() {
 #[test]
 fn test_cross_branch_transfer() {
     // 4 个子进程，初始余额 P1=40, P2=30, P3=20, P4=10（总 $100）
-    let listeners: Vec<TcpListener> = (0..4)
-        .map(|_| TcpListener::bind("127.0.0.1:0").unwrap())
-        .collect();
+    let listeners: Vec<TcpListener> =
+        (0..4).map(|_| TcpListener::bind("127.0.0.1:0").unwrap()).collect();
     let addrs: Vec<_> = listeners.iter().map(|l| l.local_addr().unwrap()).collect();
     let balances: Vec<i64> = vec![40, 30, 20, 10];
 
@@ -307,19 +300,17 @@ fn test_cross_branch_transfer() {
         handles.push(simulate_banking_child(listener, (i + 1) as u8, bal));
     }
 
-    let mut streams: Vec<TcpStream> = addrs
-        .iter()
-        .map(|a| TcpStream::connect(*a).unwrap())
-        .collect();
+    let mut streams: Vec<TcpStream> =
+        addrs.iter().map(|a| TcpStream::connect(*a).unwrap()).collect();
 
     // Phase 1: STARTED
     expect_started_all(&mut streams);
 
     // Phase 2: 多笔转账
     do_transfer(&mut streams, 1, 2, 10); // P1→P2: P1=30, P2=40
-    do_transfer(&mut streams, 3, 4, 5);  // P3→P4: P3=15, P4=15
+    do_transfer(&mut streams, 3, 4, 5); // P3→P4: P3=15, P4=15
     do_transfer(&mut streams, 2, 3, 20); // P2→P3: P2=20, P3=35
-    do_transfer(&mut streams, 4, 1, 5);  // P4→P1: P4=10, P1=35
+    do_transfer(&mut streams, 4, 1, 5); // P4→P1: P4=10, P1=35
 
     send_stop_all(&mut streams);
 
@@ -341,11 +332,7 @@ fn test_cross_branch_transfer() {
 
     // 验证余额历史完整性（每个进程的 states 数量 > 1）
     for h in &histories {
-        assert!(
-            h.states.len() >= 2,
-            "进程 {} 的历史应至少有初始和保护操作记录",
-            h.id
-        );
+        assert!(h.states.len() >= 2, "进程 {} 的历史应至少有初始和保护操作记录", h.id);
         // 时间戳应该非递减
         for w in h.states.windows(2) {
             assert!(w[1].time >= w[0].time, "进程 {} 时间不应倒退", h.id);

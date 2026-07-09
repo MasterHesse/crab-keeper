@@ -53,9 +53,9 @@ pub mod transfer;
 pub mod types;
 
 pub use account::BranchAccount;
-pub use time::{get_physical_time, PhysicalClock};
+pub use time::{PhysicalClock, get_physical_time};
 pub use transfer::transfer;
 pub use types::{
-    AccountId, AllHistory, Balance, BalanceHistory, BalanceState, Timestamp,
-    TransferOrder, MAX_PROCESS_ID, MAX_T,
+    AccountId, AllHistory, Balance, BalanceHistory, BalanceState, MAX_PROCESS_ID, MAX_T, Timestamp,
+    TransferOrder,
 };

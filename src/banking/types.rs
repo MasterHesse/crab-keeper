@@ -64,8 +64,11 @@ pub const MAX_T: usize = 256;
 /// 转账指令，父进程创建并嵌入 TRANSFER 消息发送给源子进程。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferOrder {
+    /// 源账户 ID
     pub src: AccountId,
+    /// 目标账户 ID
     pub dst: AccountId,
+    /// 转账金额
     pub amount: Balance,
 }
 
@@ -74,8 +77,11 @@ pub struct TransferOrder {
 /// `pending_in` 在 Lab 2 中始终为 0。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BalanceState {
+    /// 当前余额
     pub balance: Balance,
+    /// 快照时间戳
     pub time: Timestamp,
+    /// 待入账金额（Lab 2 始终为 0）
     pub pending_in: Balance,
 }
 
@@ -84,7 +90,9 @@ pub struct BalanceState {
 /// `states[N]` 存储时刻 N 的余额状态，间隙会自动填充前值。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BalanceHistory {
+    /// 子进程 ID
     pub id: AccountId,
+    /// 所有时刻的余额状态
     pub states: Vec<BalanceState>,
 }
 
@@ -93,6 +101,7 @@ pub struct BalanceHistory {
 /// `histories[0]` 对应进程 ID=1。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllHistory {
+    /// 各进程的余额历史
     pub histories: Vec<BalanceHistory>,
 }
 
@@ -189,6 +198,12 @@ impl BalanceHistory {
     }
 }
 
+impl Default for AllHistory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AllHistory {
     /// 创建空的 AllHistory。
     #[must_use]
@@ -218,7 +233,7 @@ impl AllHistory {
     /// 从字节流解析 AllHistory。
     #[allow(dead_code)]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() < 1 {
+        if bytes.is_empty() {
             return Err("长度不匹配".to_string());
         }
         let count = bytes[0] as usize;
@@ -249,7 +264,11 @@ impl fmt::Display for TransferOrder {
 
 impl fmt::Display for BalanceState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BalanceState {{ balance={}, time={}, pending_in={} }}", self.balance, self.time, self.pending_in)
+        write!(
+            f,
+            "BalanceState {{ balance={}, time={}, pending_in={} }}",
+            self.balance, self.time, self.pending_in
+        )
     }
 }
 

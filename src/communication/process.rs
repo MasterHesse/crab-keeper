@@ -49,7 +49,7 @@
 //! - [`std::env::current_exe`](https://doc.rust-lang.org/std/env/fn.current_exe.html)
 
 use crate::banking::types::{AccountId, AllHistory, Balance, TransferOrder};
-use crate::communication::{recv_message, send_message, Message};
+use crate::communication::{Message, recv_message, send_message};
 use anyhow::anyhow;
 use std::error::Error;
 use std::net::{TcpListener, TcpStream};
@@ -166,9 +166,7 @@ pub fn print_child_banner(id: usize, parent_addr: &str) {
     #[allow(clippy::print_stderr)]
     {
         let pid = std::process::id();
-        eprintln!(
-            "[子进程 #{id}] PID={pid}, 连接父进程: {parent_addr}",
-        );
+        eprintln!("[子进程 #{id}] PID={pid}, 连接父进程: {parent_addr}",);
     }
 }
 
@@ -195,37 +193,24 @@ mod process_tests {
     /// 验证单子进程 STARTED + DONE 同步流程
     #[test]
     fn test_process_start_sync_single_child() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .expect("绑定监听端口应成功");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");
         let addr = listener.local_addr().unwrap();
 
         // 子线程：模拟子进程行为
-        let child_handle = thread::spawn(move || {
-            run_child_worker(&addr.to_string())
-        });
+        let child_handle = thread::spawn(move || run_child_worker(&addr.to_string()));
 
         // 父进程：接受连接，验证 STARTED 和 DONE
         let (mut stream, _) = listener.accept().expect("接受连接应成功");
 
         // 检查 STARTED
-        let started_msg =
-            recv_message(&mut stream).expect("接收 STARTED 应成功");
-        assert_eq!(
-            started_msg,
-            Message::Started,
-            "第一条消息应为 STARTED"
-        );
+        let started_msg = recv_message(&mut stream).expect("接收 STARTED 应成功");
+        assert_eq!(started_msg, Message::Started, "第一条消息应为 STARTED");
 
         // 发送工作分配
-        send_message(
-            &mut stream,
-            &Message::Data(b"do work".to_vec()),
-        )
-        .expect("发送工作分配应成功");
+        send_message(&mut stream, &Message::Data(b"do work".to_vec())).expect("发送工作分配应成功");
 
         // 检查 DONE
-        let done_msg =
-            recv_message(&mut stream).expect("接收 DONE 应成功");
+        let done_msg = recv_message(&mut stream).expect("接收 DONE 应成功");
         assert_eq!(done_msg, Message::Done, "最后一条消息应为 DONE");
 
         // 确认子线程正常完成
@@ -236,8 +221,7 @@ mod process_tests {
     #[test]
     fn test_process_start_sync_multiple_children() {
         const N: usize = 3;
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .expect("绑定监听端口应成功");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");
         let addr = listener.local_addr().unwrap();
 
         // 启动 N 个子线程
@@ -251,31 +235,25 @@ mod process_tests {
         // 父进程：接受 N 个连接
         let mut streams = Vec::new();
         for _ in 0..N {
-            let (stream, _) =
-                listener.accept().expect("接受连接应成功");
+            let (stream, _) = listener.accept().expect("接受连接应成功");
             streams.push(stream);
         }
 
         // 检查所有 STARTED
         for (i, stream) in streams.iter_mut().enumerate() {
-            let msg =
-                recv_message(stream).expect(&format!("子进程 {i} STARTED 接收应成功"));
+            let msg = recv_message(stream).expect(&format!("子进程 {i} STARTED 接收应成功"));
             assert_eq!(msg, Message::Started, "子进程 {i} 应先发 STARTED");
         }
 
         // 发送工作分配
         for (i, stream) in streams.iter_mut().enumerate() {
-            send_message(
-                stream,
-                &Message::Data(format!("work for child {i}").into_bytes()),
-            )
-            .expect("发送工作应成功");
+            send_message(stream, &Message::Data(format!("work for child {i}").into_bytes()))
+                .expect("发送工作应成功");
         }
 
         // 检查所有 DONE
         for (i, stream) in streams.iter_mut().enumerate() {
-            let msg =
-                recv_message(stream).expect(&format!("子进程 {i} DONE 接收应成功"));
+            let msg = recv_message(stream).expect(&format!("子进程 {i} DONE 接收应成功"));
             assert_eq!(msg, Message::Done, "子进程 {i} 最后应发 DONE");
         }
 
@@ -311,25 +289,27 @@ mod process_tests {
             let msg = recv_message(&mut stream)?;
             match msg {
                 Message::Transfer(ref payload) => {
-                    let order = TransferOrder::from_bytes(payload)
-                        .map_err(|e| io::Error::other(e))?;
+                    let order =
+                        TransferOrder::from_bytes(payload).map_err(|e| io::Error::other(e))?;
                     let now = clock.now();
 
                     if order.src == child_id {
                         // 源账户：扣款后转发给父进程（父进程作为中继）
-                        account.debit(order.amount, now)
+                        account
+                            .debit(order.amount, now)
                             .map_err(|e| io::Error::other(e.to_string()))?;
                         send_message(&mut stream, &Message::Transfer(payload.clone()))?;
                     }
                     if order.dst == child_id {
                         // 目标账户：入账后回复 ACK
-                        account.credit(order.amount, now)
+                        account
+                            .credit(order.amount, now)
                             .map_err(|e| io::Error::other(e.to_string()))?;
                         send_message(&mut stream, &Message::Ack)?;
                     }
-                }
+                },
                 Message::Stop => break,
-                _ => {}
+                _ => {},
             }
         }
 
@@ -383,10 +363,7 @@ mod process_tests {
         );
 
         let history_msg = recv_message(&mut stream).expect("应收到 BALANCE_HISTORY");
-        assert!(
-            matches!(history_msg, Message::BalanceHistory(_)),
-            "子进程应发送 BALANCE_HISTORY"
-        );
+        assert!(matches!(history_msg, Message::BalanceHistory(_)), "子进程应发送 BALANCE_HISTORY");
 
         // 验证余额历史：同账户转账 amount=0，余额不变
         if let Message::BalanceHistory(bytes) = history_msg {

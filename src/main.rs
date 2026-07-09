@@ -7,7 +7,7 @@
 //! - **银行子进程** (Lab 2): `crab-keeper --banking-child <父进程地址>` — 启动银行分支
 
 use crab_keeper::communication::process::{
-    banking_child_work, child_work, parent_work, print_child_banner, BANKING_CHILD_ARG, CHILD_ARG,
+    BANKING_CHILD_ARG, CHILD_ARG, banking_child_work, child_work, parent_work, print_child_banner,
 };
 use std::env;
 
@@ -23,15 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             unreachable!()
         };
 
-        let child_id: u8 = env::var("CHILD_ID")
-            .unwrap_or_else(|_| "0".to_string())
-            .parse()
-            .unwrap_or(0);
+        let child_id: u8 =
+            env::var("CHILD_ID").unwrap_or_else(|_| "0".to_string()).parse().unwrap_or(0);
 
-        let initial_balance: i64 = env::var("CHILD_BALANCE")
-            .unwrap_or_else(|_| "0".to_string())
-            .parse()
-            .unwrap_or(0);
+        let initial_balance: i64 =
+            env::var("CHILD_BALANCE").unwrap_or_else(|_| "0".to_string()).parse().unwrap_or(0);
 
         print_child_banner(child_id as usize, parent_addr);
 
@@ -40,11 +36,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(()) => {
                 eprintln!("[银行子进程 #{child_id}] 完成");
                 Ok(())
-            }
+            },
             Err(e) => {
                 eprintln!("[银行子进程 #{child_id}] 错误: {e}");
                 Err(e)
-            }
+            },
         }
     }
     // 解析命令行参数：如果包含 --child，则以子进程模式运行
@@ -54,13 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args[2].as_str()
         } else {
             print_usage_and_exit();
-             unreachable!()
+            unreachable!()
         };
 
-        let child_id: usize = env::var("CHILD_ID")
-            .unwrap_or_else(|_| "0".to_string())
-            .parse()
-            .unwrap_or(0);
+        let child_id: usize =
+            env::var("CHILD_ID").unwrap_or_else(|_| "0".to_string()).parse().unwrap_or(0);
 
         print_child_banner(child_id, parent_addr);
 
@@ -69,11 +63,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(()) => {
                 eprintln!("[子进程 #{child_id}] 完成");
                 Ok(())
-            }
+            },
             Err(e) => {
                 eprintln!("[子进程 #{child_id}] 错误: {e}");
                 Err(e)
-            }
+            },
         }
     } else {
         // 父进程模式

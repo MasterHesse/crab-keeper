@@ -25,8 +25,7 @@ fn spawn_child_process(parent_addr: &str, child_id: usize) -> Child {
 /// 此测试需要 `channel` 和 `process` 的 TODO 全部实现完成后才可通过。
 #[test]
 fn test_integration_parent_child_sync() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .expect("绑定监听端口失败");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口失败");
     let addr = listener.local_addr().unwrap();
 
     // 启动子进程
@@ -36,13 +35,9 @@ fn test_integration_parent_child_sync() {
     let (mut stream, _) = listener.accept().expect("接受子进程连接失败");
 
     // 接收 STARTED
-    use crab_keeper::communication::{recv_message, send_message, Message};
+    use crab_keeper::communication::{Message, recv_message, send_message};
     let msg = recv_message(&mut stream).expect("接收 STARTED 失败");
-    assert_eq!(
-        msg,
-        Message::Started,
-        "子进程应首先发送 STARTED"
-    );
+    assert_eq!(msg, Message::Started, "子进程应首先发送 STARTED");
 
     // 发送工作分配
     send_message(&mut stream, &Message::Data(b"hello from parent".to_vec()))
@@ -60,17 +55,15 @@ fn test_integration_parent_child_sync() {
 /// 验证多个子进程能并发地完成 STARTED → DONE 同步
 #[test]
 fn test_integration_multiple_children() {
-    use crab_keeper::communication::{recv_message, send_message, Message};
+    use crab_keeper::communication::{Message, recv_message, send_message};
 
     const N: usize = 3;
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .expect("绑定监听端口失败");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口失败");
     let addr = listener.local_addr().unwrap();
 
     // 启动 N 个子进程
-    let mut children: Vec<Child> = (0..N)
-        .map(|i| spawn_child_process(&addr.to_string(), i))
-        .collect();
+    let mut children: Vec<Child> =
+        (0..N).map(|i| spawn_child_process(&addr.to_string(), i)).collect();
 
     // 父进程：接受 N 个连接
     let mut streams: Vec<TcpStream> = Vec::with_capacity(N);
@@ -81,32 +74,26 @@ fn test_integration_multiple_children() {
 
     // 检查所有 STARTED
     for (i, stream) in streams.iter_mut().enumerate() {
-        let msg = recv_message(stream)
-            .unwrap_or_else(|e| panic!("子进程 {i} STARTED 接收失败: {e}"));
+        let msg =
+            recv_message(stream).unwrap_or_else(|e| panic!("子进程 {i} STARTED 接收失败: {e}"));
         assert_eq!(msg, Message::Started, "子进程 {i} 应发送 STARTED");
     }
 
     // 分发工作
     for (i, stream) in streams.iter_mut().enumerate() {
-        send_message(
-            stream,
-            &Message::Data(format!("work #{i}").into_bytes()),
-        )
-        .unwrap_or_else(|e| panic!("向子进程 {i} 发送工作失败: {e}"));
+        send_message(stream, &Message::Data(format!("work #{i}").into_bytes()))
+            .unwrap_or_else(|e| panic!("向子进程 {i} 发送工作失败: {e}"));
     }
 
     // 检查所有 DONE
     for (i, stream) in streams.iter_mut().enumerate() {
-        let msg = recv_message(stream)
-            .unwrap_or_else(|e| panic!("子进程 {i} DONE 接收失败: {e}"));
+        let msg = recv_message(stream).unwrap_or_else(|e| panic!("子进程 {i} DONE 接收失败: {e}"));
         assert_eq!(msg, Message::Done, "子进程 {i} 应发送 DONE");
     }
 
     // 等待所有子进程退出
     for (i, mut child) in children.drain(..).enumerate() {
-        let status = child.wait().unwrap_or_else(|e| {
-            panic!("等待子进程 {i} 退出失败: {e}")
-        });
+        let status = child.wait().unwrap_or_else(|e| panic!("等待子进程 {i} 退出失败: {e}"));
         assert!(status.success(), "子进程 {i} 应以 0 退出, 实际: {status}");
     }
 }
@@ -119,8 +106,5 @@ fn test_integration_child_connection_refused() {
 
     // 子进程应该以非 0 状态码退出（连接被拒绝）
     let status = child.wait().expect("等待子进程退出失败");
-    assert!(
-        !status.success(),
-        "连接被拒绝时，子进程应以非 0 状态码退出"
-    );
+    assert!(!status.success(), "连接被拒绝时，子进程应以非 0 状态码退出");
 }

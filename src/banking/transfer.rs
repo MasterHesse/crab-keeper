@@ -16,15 +16,27 @@
 use std::net::TcpStream;
 
 use crate::banking::types::{AccountId, Balance, TransferOrder};
-use crate::communication::{recv_message, send_message, Message};
+use crate::communication::{Message, recv_message, send_message};
 
 /// 银行系统错误类型。
 #[derive(Debug)]
 pub enum BankingError {
+    /// 账户未找到
     AccountNotFound(AccountId),
-    InsufficientFunds { account: AccountId, balance: Balance, required: Balance },
+    /// 余额不足
+    InsufficientFunds {
+        /// 账户 ID
+        account: AccountId,
+        /// 当前余额
+        balance: Balance,
+        /// 所需金额
+        required: Balance,
+    },
+    /// 协议错误
     ProtocolError(String),
+    /// 网络错误
     NetworkError(String),
+    /// 序列化错误
     SerializationError(String),
 }
 
@@ -34,7 +46,7 @@ impl std::fmt::Display for BankingError {
             Self::AccountNotFound(id) => write!(f, "账户未找到: {id}"),
             Self::InsufficientFunds { account, balance, required } => {
                 write!(f, "账户 {account} 余额不足: 现有 {balance}，需要 {required}")
-            }
+            },
             Self::ProtocolError(msg) => write!(f, "协议错误: {msg}"),
             Self::NetworkError(msg) => write!(f, "网络错误: {msg}"),
             Self::SerializationError(msg) => write!(f, "序列化错误: {msg}"),

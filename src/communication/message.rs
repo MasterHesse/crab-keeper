@@ -91,35 +91,35 @@ impl Message {
         match self {
             Message::Started => {
                 buf.push(0x00);
-                buf.extend_from_slice(&[0,0,0,0,0,0,0,0]);
-            }
+                buf.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+            },
             Message::Done => {
                 buf.push(0x01);
-                buf.extend_from_slice(&[0,0,0,0,0,0,0,0]);
-            }
+                buf.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+            },
             Message::Data(payload) => {
                 buf.push(0x02);
                 buf.extend_from_slice(&(payload.len() as u64).to_be_bytes());
                 buf.extend_from_slice(payload);
-            }
+            },
             Message::Transfer(payload) => {
                 buf.push(0x03);
                 buf.extend_from_slice(&(payload.len() as u64).to_be_bytes());
                 buf.extend_from_slice(payload);
-            }
+            },
             Message::Ack => {
                 buf.push(0x04);
-                buf.extend_from_slice(&[0,0,0,0,0,0,0,0]);
-            }
+                buf.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+            },
             Message::Stop => {
                 buf.push(0x05);
-                buf.extend_from_slice(&[0,0,0,0,0,0,0,0]);
-            }
+                buf.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+            },
             Message::BalanceHistory(payload) => {
                 buf.push(0x06);
                 buf.extend_from_slice(&(payload.len() as u64).to_be_bytes());
                 buf.extend_from_slice(payload);
-            }
+            },
         }
 
         buf
@@ -149,9 +149,9 @@ impl Message {
         };
 
         let tag: u8 = bytes[0];
-        
+
         let payload_len: u64 = u64::from_be_bytes(bytes[1..9].try_into().unwrap());
-        
+
         if bytes[9..].len() as u64 != payload_len {
             return Err("消息长度不匹配".to_string());
         };
@@ -162,40 +162,32 @@ impl Message {
                     return Err("STARTED 消息长度必须为 0".to_string());
                 }
                 Ok(Message::Started)
-            }
+            },
             0x01 => {
                 if payload_len != 0 {
                     return Err("DONE 消息长度必须为 0".to_string());
                 }
                 Ok(Message::Done)
-            }
-            0x02 => {
-                Ok(Message::Data(bytes[9..].to_vec()))
-            }
-            0x03 => {
-                Ok(Message::Transfer(bytes[9..].to_vec()))
-            }
+            },
+            0x02 => Ok(Message::Data(bytes[9..].to_vec())),
+            0x03 => Ok(Message::Transfer(bytes[9..].to_vec())),
             0x04 => {
                 if payload_len == 0 {
                     Ok(Message::Ack)
                 } else {
-                    return Err("ACK 消息长度必须为 0".to_string());
+                    Err("ACK 消息长度必须为 0".to_string())
                 }
-            }
+            },
             0x05 => {
                 if payload_len == 0 {
                     Ok(Message::Stop)
                 } else {
-                    return Err("STOP 消息长度必须为 0".to_string());
+                    Err("STOP 消息长度必须为 0".to_string())
                 }
-            }
-            0x06 => {
-                Ok(Message::BalanceHistory(bytes[9..].to_vec()))
-            }
-            _ => Err(format!("未知 tag: 0x{:02X}", tag))
-            
+            },
+            0x06 => Ok(Message::BalanceHistory(bytes[9..].to_vec())),
+            _ => Err(format!("未知 tag: 0x{:02X}", tag)),
         }
-
     }
 }
 
@@ -206,15 +198,15 @@ impl fmt::Display for Message {
             Self::Done => write!(f, "DONE"),
             Self::Data(payload) => {
                 write!(f, "DATA({}B)", payload.len())
-            }
+            },
             Self::Transfer(payload) => {
                 write!(f, "TRANSFER({}B)", payload.len())
-            }
+            },
             Self::Ack => write!(f, "ACK"),
             Self::Stop => write!(f, "STOP"),
             Self::BalanceHistory(payload) => {
                 write!(f, "BALANCE_HISTORY({}B)", payload.len())
-            }
+            },
         }
     }
 }
@@ -368,10 +360,7 @@ mod message_tests {
         let mut bytes = vec![0x04];
         bytes.extend_from_slice(&len_bytes);
         bytes.extend_from_slice(&[0u8; 5]); // 追加 5 字节 payload
-        assert!(
-            Message::from_bytes(&bytes).is_err(),
-            "ACK 带 payload 应返回错误"
-        );
+        assert!(Message::from_bytes(&bytes).is_err(), "ACK 带 payload 应返回错误");
     }
 
     /// 验证 STOP 的 from_bytes 拒绝非空 payload
@@ -381,9 +370,6 @@ mod message_tests {
         let mut bytes = vec![0x05];
         bytes.extend_from_slice(&len_bytes);
         bytes.extend_from_slice(&[1u8, 2, 3]);
-        assert!(
-            Message::from_bytes(&bytes).is_err(),
-            "STOP 带 payload 应返回错误"
-        );
+        assert!(Message::from_bytes(&bytes).is_err(), "STOP 带 payload 应返回错误");
     }
 }

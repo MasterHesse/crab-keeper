@@ -10,7 +10,14 @@ use crate::banking::types::{AccountId, Balance, BalanceHistory, BalanceState, Ti
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountError {
     /// 余额不足
-    InsufficientFunds { account_id: AccountId, balance: Balance, required: Balance },
+    InsufficientFunds {
+        /// 账户 ID
+        account_id: AccountId,
+        /// 当前余额
+        balance: Balance,
+        /// 所需金额
+        required: Balance,
+    },
     /// 金额无效（如非正数）
     InvalidAmount(Balance),
 }
@@ -20,7 +27,7 @@ impl std::fmt::Display for AccountError {
         match self {
             Self::InsufficientFunds { account_id, balance, required } => {
                 write!(f, "账户 {account_id} 余额不足: 现有 {}，需要 {}", balance, required)
-            }
+            },
             Self::InvalidAmount(amount) => write!(f, "无效金额: {}", amount),
         }
     }
@@ -29,7 +36,9 @@ impl std::fmt::Display for AccountError {
 /// 分支账户，维护余额和余额历史。
 #[derive(Debug, Clone)]
 pub struct BranchAccount {
+    /// 账户 ID（等于子进程 ID）
     pub id: AccountId,
+    /// 余额历史
     pub history: BalanceHistory,
 }
 
@@ -126,7 +135,7 @@ mod account_tests {
                 assert_eq!(account_id, 3);
                 assert_eq!(balance, 50);
                 assert_eq!(required, 100);
-            }
+            },
             _ => panic!("预期 InsufficientFunds 错误"),
         }
         assert_eq!(acc.current_balance(), 50);
