@@ -21,7 +21,7 @@
 //!
 //! ### parent_work
 //!
-//! ```
+//! ```text
 //! 1. 绑定 TCP 监听端口 (TcpListener::bind("127.0.0.1:0") → 随机端口)
 //! 2. 获取实际监听地址
 //! 3. 循环 spawn 子进程，传参 --child <addr>
@@ -34,7 +34,7 @@
 //!
 //! ### child_work
 //!
-//! ```
+//! ```text
 //! 1. 连接父进程地址 (TcpStream::connect(parent_addr))
 //! 2. 发送 STARTED 消息
 //! 3. 接收父进程发来的 Data 消息
@@ -171,9 +171,10 @@ pub fn print_child_banner(id: usize, parent_addr: &str) {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod process_tests {
     use super::*;
-    use crate::banking::types::{AccountId, Balance, BalanceHistory, TransferOrder};
+    use crate::banking::types::{AccountId, Balance, TransferOrder};
     use crate::communication::Message;
     use std::io;
     use std::net::TcpStream;
@@ -241,7 +242,8 @@ mod process_tests {
 
         // 检查所有 STARTED
         for (i, stream) in streams.iter_mut().enumerate() {
-            let msg = recv_message(stream).expect(&format!("子进程 {i} STARTED 接收应成功"));
+            let msg =
+                recv_message(stream).unwrap_or_else(|_| panic!("子进程 {i} STARTED 接收应成功"));
             assert_eq!(msg, Message::Started, "子进程 {i} 应先发 STARTED");
         }
 
@@ -253,7 +255,7 @@ mod process_tests {
 
         // 检查所有 DONE
         for (i, stream) in streams.iter_mut().enumerate() {
-            let msg = recv_message(stream).expect(&format!("子进程 {i} DONE 接收应成功"));
+            let msg = recv_message(stream).unwrap_or_else(|_| panic!("子进程 {i} DONE 接收应成功"));
             assert_eq!(msg, Message::Done, "子进程 {i} 最后应发 DONE");
         }
 
@@ -289,8 +291,7 @@ mod process_tests {
             let msg = recv_message(&mut stream)?;
             match msg {
                 Message::Transfer(ref payload) => {
-                    let order =
-                        TransferOrder::from_bytes(payload).map_err(|e| io::Error::other(e))?;
+                    let order = TransferOrder::from_bytes(payload).map_err(io::Error::other)?;
                     let now = clock.now();
 
                     if order.src == child_id {
@@ -384,18 +385,13 @@ mod process_tests {
         let addr = listener.local_addr().expect("获取监听地址应成功");
 
         // 启动 2 个模拟子进程线程（余额 P1=100, P2=50）
-        let child1 = thread::spawn({
-            let addr = addr;
-            move || {
-                let stream = TcpStream::connect(addr).expect("连接应成功");
-                simulate_banking_child(stream, 1, 100)
-            }
+        let child1 = thread::spawn(move || {
+            let stream = TcpStream::connect(addr).expect("连接应成功");
+            simulate_banking_child(stream, 1, 100)
         });
-        let child2 = thread::spawn({
-            move || {
-                let stream = TcpStream::connect(addr).expect("连接应成功");
-                simulate_banking_child(stream, 2, 50)
-            }
+        let child2 = thread::spawn(move || {
+            let stream = TcpStream::connect(addr).expect("连接应成功");
+            simulate_banking_child(stream, 2, 50)
         });
 
         // 父进程接受 2 个连接
