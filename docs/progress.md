@@ -9,7 +9,7 @@
 | 阶段 | 名称 | 核心任务 | 测试用例 | 预计工期 | 状态 |
 |------|------|---------|---------|---------|------|
 | P1 | 初识分布式通信 | 实现 parent_work / child_work 函数，完成进程启动（STARTED）与结束（DONE）同步；建立消息收发机制 | `test_process_start_sync`、`test_process_done_sync`、`test_message_send_recv` | - | ✅ 已完成 |
-| P2 | 分布式银行系统 | 实现跨进程资金转账功能；保证转账原子性与一致性；引入 get_physical_time 模拟物理时间 | `test_transfer_atomicity`、`test_balance_consistency`、`test_cross_branch_transfer` | - | 🔵 当前阶段 |
+| P2 | 分布式银行系统 | 实现跨进程资金转账功能；保证转账原子性与一致性；引入 get_physical_time 模拟物理时间 | `test_transfer_atomicity`、`test_balance_consistency`、`test_cross_branch_transfer` | - | ✅ 已完成 |
 | P3 | Lamport 逻辑时钟 | 实现 Lamport 逻辑时钟算法；为每个消息事件分配逻辑时间戳；修正阶段二中物理时钟导致的潜在状态不一致 | `test_logical_clock_increment`、`test_event_timestamp_ordering`、`test_clock_sync_on_receive` | - | 未开始 |
 | P4 | 分布式互斥算法 | 实现 Ricart-Agrawala 算法；多进程竞争临界区以安全调用 print 函数；综合运用通信、协调与逻辑时钟 | `test_cs_enter_exclusive`、`test_cs_release`、`test_request_queue_priority`、`test_multi_process_cs` | - | 未开始 |
 
@@ -33,10 +33,10 @@
 
 ### 2.1 当前进度总览
 
-- **当前阶段**：P2 (分布式银行系统)
-- **已完成阶段**：P0, P1
+- **当前阶段**：P3 (Lamport 逻辑时钟)
+- **已完成阶段**：P0, P1, P2
 - **进行中阶段**：无
-- **完成度**：2 / 10
+- **完成度**：3 / 10
 
 ### 2.2 各阶段详细进度
 
@@ -82,11 +82,42 @@ src/communication/
 
 | 任务 | 预计工时 | 实际用时 | 状态 |
 |------|---------|---------|------|
-| 编写转账原子性测试用例 | - | - | 未开始 |
-| 实现账户数据模型 | - | - | 未开始 |
-| 实现跨分支转账逻辑 | - | - | 未开始 |
-| 实现 get_physical_time 调用 | - | - | 未开始 |
-| 测试通过验证 | - | - | 未开始 |
+| 账户数据模型（类型定义与序列化） | - | - | ✅ 已完成 |
+| 物理时钟实现（get_physical_time / PhysicalClock） | - | - | ✅ 已完成 |
+| 消息类型扩展（Transfer / Ack / Stop / BalanceHistory） | - | - | ✅ 已完成 |
+| 账户操作实现（debit / credit / 余额历史追踪） | - | - | ✅ 已完成 |
+| 跨分支转账协议（transfer / BankingError） | - | - | ✅ 已完成 |
+| 父/子进程银行业务工作流 | - | - | ✅ 已完成 |
+| 集成测试（原子性 / 一致性 / 跨分支） | - | - | ✅ 已完成 |
+| 全量测试通过（53/53） | - | - | ✅ 已完成 |
+
+**模块结构：**
+
+```
+src/banking/
+├── mod.rs         # 模块入口与公共导出
+├── types.rs       # TransferOrder / BalanceState / BalanceHistory / AllHistory
+├── time.rs        # get_physical_time() + PhysicalClock
+├── account.rs     # BranchAccount (debit / credit / record_state)
+└── transfer.rs    # transfer() 链式转账协议
+
+src/communication/
+├── message.rs     # [扩展] Message 枚举：Transfer(0x03) / Ack(0x04) / Stop(0x05) / BalanceHistory(0x06)
+└── process.rs     # [扩展] banking_parent_work / banking_child_work / print_history
+
+tests/
+└── banking_integration_test.rs  # 转账原子性 / 余额一致性 / 跨分支转账
+```
+
+**转账协议（ITMO 链式同步模型）：**
+
+```
+Parent                Source Child            Dest Child
+  │                      │                      │
+  │── TRANSFER ─────────►│ debit                 │
+  │                      │── TRANSFER ──────────►│ credit
+  │◄───────────────────────────────── ACK ──────│
+```
 
 #### P3 - Lamport 逻辑时钟
 
@@ -161,7 +192,9 @@ src/communication/
 
 | 编号 | 发现日期 | 关联阶段 | Bug 现象 | 根本原因 | 解决方案 | 状态 |
 |------|---------|---------|---------|---------|---------|------|
-| - | - | - | 暂无 | - | - | - |
+| BUG-001 | 2026-06-29 | P2 | `use anyhow::Ok` 导致所有 `Ok(...)` 推断为 `Result<_, anyhow::Error>` | `anyhow::Ok` 覆盖了 `std::result::Result::Ok` | 删除 `use anyhow::Ok` | ✅ 已修复 |
+| BUG-002 | 2026-06-29 | P2 | `from_bytes` 中先切片后校验长度导致越界 panic | 校验顺序错误，应先校验总长度再安全切片 | 将长度校验移动到切片操作之前 | ✅ 已修复 |
+| BUG-003 | 2026-06-29 | P2 | `AllHistory` 序列化用 u64 写长度，反序列化用 u16 读 | to_bytes/from_bytes 类型不匹配 | 统一使用 u64 大端 + 游标累加解析 | ✅ 已修复 |
 
 > 每发现一个 Bug，请记录以下内容：
 > - **编号**：唯一递增编号，格式 BUG-XXX。

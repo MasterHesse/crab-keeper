@@ -48,15 +48,18 @@
 //! - [`std::process::Command`](https://doc.rust-lang.org/std/process/struct.Command.html)
 //! - [`std::env::current_exe`](https://doc.rust-lang.org/std/env/fn.current_exe.html)
 
+use crate::banking::types::{AccountId, AllHistory, Balance, TransferOrder};
 use crate::communication::{recv_message, send_message, Message};
+use anyhow::anyhow;
 use std::error::Error;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 
-use anyhow::anyhow;
-
 /// 子进程启动时传入的命令行参数标志
 pub const CHILD_ARG: &str = "--child";
+
+/// 银行业务子进程启动时的命令行参数标志（阶段二）
+pub const BANKING_CHILD_ARG: &str = "--banking-child";
 
 /// 父进程入口：协调多个子进程完成分布式同步。
 ///
@@ -172,6 +175,7 @@ pub fn print_child_banner(id: usize, parent_addr: &str) {
 #[cfg(test)]
 mod process_tests {
     use super::*;
+    use crate::banking::types::{AccountId, Balance, BalanceHistory, TransferOrder};
     use crate::communication::Message;
     use std::io;
     use std::net::TcpStream;
@@ -280,4 +284,288 @@ mod process_tests {
             handle.join().expect("子线程应正常结束").expect("子逻辑应成功");
         }
     }
+
+    // ═══════════════════════════════════════════════════════
+    // 阶段二：银行系统测试 (Lab 2)
+    // ═══════════════════════════════════════════════════════
+
+    /// 模拟银行子进程的三阶段协议（在线程中内联实现）。
+    /// 接收 TRANSFER→回复 ACK，接收 STOP→回复 DONE+BALANCE_HISTORY
+    fn simulate_banking_child(
+        mut stream: TcpStream,
+        child_id: AccountId,
+        initial_balance: Balance,
+    ) -> io::Result<()> {
+        use crate::banking::account::BranchAccount;
+        use crate::banking::time::PhysicalClock;
+        use crate::banking::types::{BalanceHistory, TransferOrder};
+
+        // Phase 1: STARTED
+        send_message(&mut stream, &Message::Started)?;
+
+        let mut account = BranchAccount::new(child_id, initial_balance);
+        let mut clock = PhysicalClock::new();
+
+        // Phase 2: handle TRANSFER / STOP
+        loop {
+            let msg = recv_message(&mut stream)?;
+            match msg {
+                Message::Transfer(ref payload) => {
+                    let order = TransferOrder::from_bytes(payload)
+                        .map_err(|e| io::Error::other(e))?;
+                    let now = clock.now();
+
+                    if order.src == child_id {
+                        // 源账户：扣款后转发给父进程（父进程作为中继）
+                        account.debit(order.amount, now)
+                            .map_err(|e| io::Error::other(e.to_string()))?;
+                        send_message(&mut stream, &Message::Transfer(payload.clone()))?;
+                    }
+                    if order.dst == child_id {
+                        // 目标账户：入账后回复 ACK
+                        account.credit(order.amount, now)
+                            .map_err(|e| io::Error::other(e.to_string()))?;
+                        send_message(&mut stream, &Message::Ack)?;
+                    }
+                }
+                Message::Stop => break,
+                _ => {}
+            }
+        }
+
+        // Phase 3: DONE + BALANCE_HISTORY
+        send_message(&mut stream, &Message::Done)?;
+        let history_bytes = account.history.to_bytes();
+        send_message(&mut stream, &Message::BalanceHistory(history_bytes))?;
+
+        Ok(())
+    }
+
+    /// 验证银行子进程的三阶段流程：STARTED → TRANSFER/ACK → STOP → DONE+BALANCE_HISTORY
+    #[test]
+    fn test_banking_child_transfer_and_stop() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");
+        let addr = listener.local_addr().expect("获取监听地址应成功");
+
+        // 子线程：模拟银行子进程（child 1，余额 100）
+        let handle = thread::spawn(move || {
+            let stream = TcpStream::connect(addr).expect("子进程应能连接");
+            simulate_banking_child(stream, 1, 100)
+        });
+
+        let (mut stream, _) = listener.accept().expect("父进程接受连接应成功");
+
+        // Phase 1: 子进程发送 STARTED
+        let msg = recv_message(&mut stream).expect("应收到 STARTED");
+        assert_eq!(msg, Message::Started, "子进程应先发 STARTED");
+
+        // Phase 2: 发送 TRANSFER（src=dst=1 同账户，金额 20）
+        // 子进程先扣款→转发(TRANSFER)，再入账→回复(ACK)，余额增/减相抵不变
+        let order = TransferOrder { src: 1, dst: 1, amount: 20 };
+        send_message(&mut stream, &Message::Transfer(order.to_bytes()))
+            .expect("发送 TRANSFER 应成功");
+
+        // 子进程先转发 TRANSFER（作为 src），再发送 ACK（作为 dst）
+        let relayed = recv_message(&mut stream).expect("应收到转发的 TRANSFER");
+        assert!(matches!(relayed, Message::Transfer(_)), "src 应转发 TRANSFER");
+
+        let ack = recv_message(&mut stream).expect("应收到 ACK");
+        assert_eq!(ack, Message::Ack, "dst 应回复 ACK");
+
+        // 发送 STOP，子进程进入 Phase 3
+        send_message(&mut stream, &Message::Stop).expect("发送 STOP 应成功");
+
+        // Phase 3: 子进程发送 DONE + BALANCE_HISTORY
+        assert_eq!(
+            recv_message(&mut stream).expect("应收到 DONE"),
+            Message::Done,
+            "子进程应发送 DONE"
+        );
+
+        let history_msg = recv_message(&mut stream).expect("应收到 BALANCE_HISTORY");
+        assert!(
+            matches!(history_msg, Message::BalanceHistory(_)),
+            "子进程应发送 BALANCE_HISTORY"
+        );
+
+        // 验证余额历史：同账户转账 amount=0，余额不变
+        if let Message::BalanceHistory(bytes) = history_msg {
+            let history = BalanceHistory::from_bytes(&bytes).expect("解析 BALANCE_HISTORY 应成功");
+            assert_eq!(history.id, 1);
+            let last = history.states.last().unwrap();
+            assert_eq!(last.balance, 100, "amount=0 转账后余额应不变");
+        }
+
+        handle.join().expect("子线程应正常结束").expect("子逻辑应成功");
+    }
+
+    /// 验证父进程协调多子进程的转账流程（使用线程模拟）
+    #[test]
+    fn test_banking_parent_work_transfers() {
+        // 父进程监听
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");
+        let addr = listener.local_addr().expect("获取监听地址应成功");
+
+        // 启动 2 个模拟子进程线程（余额 P1=100, P2=50）
+        let child1 = thread::spawn({
+            let addr = addr;
+            move || {
+                let stream = TcpStream::connect(addr).expect("连接应成功");
+                simulate_banking_child(stream, 1, 100)
+            }
+        });
+        let child2 = thread::spawn({
+            move || {
+                let stream = TcpStream::connect(addr).expect("连接应成功");
+                simulate_banking_child(stream, 2, 50)
+            }
+        });
+
+        // 父进程接受 2 个连接
+        let (mut s1, _) = listener.accept().expect("接受子进程 1 应成功");
+        let (mut s2, _) = listener.accept().expect("接受子进程 2 应成功");
+
+        // Phase 1: 等待 STARTED x2
+        assert_eq!(recv_message(&mut s1).unwrap(), Message::Started);
+        assert_eq!(recv_message(&mut s2).unwrap(), Message::Started);
+
+        // Phase 2: 转账 P1→P2 $30
+        // 1. 发送 TRANSFER 给 P1（src）
+        let order = TransferOrder { src: 1, dst: 2, amount: 30 };
+        send_message(&mut s1, &Message::Transfer(order.to_bytes())).unwrap();
+        // 2. P1 扣款后发回 TRANSFER，父进程中继给 P2
+        let relayed = recv_message(&mut s1).unwrap();
+        send_message(&mut s2, &relayed).unwrap();
+        // 3. P2 入账后回复 ACK，父进程接收
+        let ack = recv_message(&mut s2).unwrap();
+        assert_eq!(ack, Message::Ack);
+
+        // 发送 STOP x2
+        send_message(&mut s1, &Message::Stop).unwrap();
+        send_message(&mut s2, &Message::Stop).unwrap();
+
+        // Phase 3: 接收 DONE x2
+        assert_eq!(recv_message(&mut s1).unwrap(), Message::Done);
+        assert_eq!(recv_message(&mut s2).unwrap(), Message::Done);
+
+        // 接收 BALANCE_HISTORY x2，汇总验证
+        let h1 = match recv_message(&mut s1).unwrap() {
+            Message::BalanceHistory(b) => BalanceHistory::from_bytes(&b).unwrap(),
+            other => panic!("expected BALANCE_HISTORY from child 1, got {}", other),
+        };
+        let h2 = match recv_message(&mut s2).unwrap() {
+            Message::BalanceHistory(b) => BalanceHistory::from_bytes(&b).unwrap(),
+            other => panic!("expected BALANCE_HISTORY from child 2, got {}", other),
+        };
+
+        // 验证余额：P1=100-30=70, P2=50+30=80
+        assert_eq!(h1.states.last().unwrap().balance, 70, "P1 扣款后应为 70");
+        assert_eq!(h2.states.last().unwrap().balance, 80, "P2 入账后应为 80");
+
+        child1.join().unwrap().unwrap();
+        child2.join().unwrap().unwrap();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 阶段二：银行业务工作流 (Lab 2)
+// ═══════════════════════════════════════════════════════════
+
+/// 银行业务子进程工作流。
+///
+/// 对应 ITMO Lab 2 中 `child_work` 的三阶段扩展版本。
+///
+/// # 参数
+///
+/// - `parent_addr`: 父进程监听地址
+/// - `child_id`: 本子进程 ID（1-indexed），同时也是账户 ID
+/// - `initial_balance`: 初始余额
+///
+/// # 三阶段流程
+///
+/// ## Phase 1: STARTED 同步
+/// - 连接到父进程
+/// - 发送 `Message::Started` 给父进程
+/// - （完整 ITMO 模型中还需要与兄弟进程交换 STARTED）
+///
+/// ## Phase 2: 处理转账
+/// - 使用 `receive_any()` 风格的循环接收消息
+/// - 收到 `Message::Transfer(payload)`:
+///   - 解析 `TransferOrder::from_bytes(&payload)`
+///   - 若 `order.src == self child_id`（我是源）：执行 debit，将 TRANSFER 转发给 dst 子进程
+///   - 若 `order.dst == self child_id`（我是目标）：执行 credit，向父进程发送 ACK
+/// - 收到 `Message::Stop`: 退出 Phase 2，进入 Phase 3
+///
+/// ## Phase 3: DONE 同步 + 上报
+/// - 发送 `Message::Done` 给父进程
+/// - 发送 `Message::BalanceHistory(history.to_bytes())` 给父进程
+///
+/// ## HINT: 简化版本的 receive_any
+///
+/// 在本例中，子进程只有一个 TCP 连接到父进程（父进程作为消息中继）。
+/// 因此接收消息时直接使用 `recv_message` 即可。
+///
+/// 完整 ITMO 模型中，子进程有多个对等连接，需要使用类似 `select` / `poll` 的机制
+/// 从多个流中选择有数据可读的那个。在 Rust 中可以使用 `mio` 或简单的忙轮询。
+#[allow(dead_code)]
+pub fn banking_child_work(
+    _parent_addr: &str,
+    _child_id: AccountId,
+    _initial_balance: Balance,
+) -> Result<(), Box<dyn Error>> {
+    unimplemented!()
+}
+
+/// 银行业务父进程工作流。
+///
+/// 对应 ITMO Lab 2 中 `parent_work` 的扩展版本。
+///
+/// # 参数
+///
+/// - `children_count`: 子进程数量
+/// - `initial_balances`: 每个子进程的初始余额（长度必须 == children_count）
+/// - `transfer_orders`: 转账指令列表（由 `bank_operations` 生成）
+///
+/// # 流程
+///
+/// 1. 绑定监听端口、启动子进程、接受连接（同 Lab 1）
+/// 2. 等待所有子进程发送 STARTED
+/// 3. 对 `transfer_orders` 中每条指令调用 `transfer()`
+/// 4. 向所有子进程发送 STOP
+/// 5. 等待所有子进程发送 DONE
+/// 6. 接收所有子进程的 BALANCE_HISTORY
+/// 7. 汇总为 `AllHistory`，调用 `print_history()`
+///
+/// # HINT: 消息路由 (父进程作为中继)
+///
+/// 在简化模型中，子进程之间的通信通过父进程中继。
+/// 当父进程收到一条 TRANSFER 消息（从源子进程发给目标子进程）时，
+/// 它需要将这条消息转发给目标子进程。
+///
+/// 例如，在 transfer() 函数发送 TRANSFER 给 src 后，src 会扣款然后
+/// 通过父进程将 TRANSFER 转发给 dst，父进程需要接收这个转发并传递给 dst。
+///
+/// 这意味着父进程在等待 ACK 时需要：
+/// 1. 从 src 的流上收到转发的 TRANSFER（由 src 发向 dst）
+/// 2. 将这条 TRANSFER 写入 dst 的流
+/// 3. 从 dst 的流上等待 ACK
+#[allow(dead_code)]
+pub fn banking_parent_work(
+    children_count: usize,
+    _initial_balances: &[Balance],
+    _transfer_orders: &[TransferOrder],
+) -> Result<AllHistory, Box<dyn Error>> {
+    if children_count == 0 {
+        return Ok(AllHistory::new());
+    }
+    if children_count > 9 {
+        return Err(anyhow!("子进程数量不能超过 9 (ITMO 限制)").into());
+    }
+    unimplemented!()
+}
+
+/// 打印所有子进程的余额历史到标准输出。
+#[allow(dead_code)]
+pub fn print_history(_history: &AllHistory) {
+    unimplemented!()
 }

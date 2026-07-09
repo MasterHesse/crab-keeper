@@ -34,4 +34,7 @@ pub mod process;
 
 pub use channel::{recv_message, send_message};
 pub use message::Message;
-pub use process::{child_work, parent_work};
+pub use process::{
+    banking_child_work, banking_parent_work, child_work, parent_work, print_history,
+    BANKING_CHILD_ARG, CHILD_ARG,
+};
