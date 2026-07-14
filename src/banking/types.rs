@@ -74,14 +74,21 @@ pub struct TransferOrder {
 
 /// 某一时刻的余额快照。
 ///
-/// `pending_in` 在 Lab 2 中始终为 0。
+/// 在 Lab 2 中 `pending_in` 始终为 0。
+/// **Lab 3** 引入 Lamport 时钟后，`pending_in` 用于追踪"飞行中"的资金：
+/// 当源账户已扣款但目标账户尚未入账时，`pending_in` 记录通道中的金额。
+///
+/// 配合逻辑时间戳，`pending_in` 确保在任意的"一致切面"下，
+/// **各账户余额之和 + 各通道中 pending 金额之和 = 常数**。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BalanceState {
     /// 当前余额
     pub balance: Balance,
-    /// 快照时间戳
+    /// 快照时间戳（Lamport 逻辑时间）
     pub time: Timestamp,
-    /// 待入账金额（Lab 2 始终为 0）
+    /// 待入账金额 — 资金在通道中但尚未到达目标账户。
+    ///
+    /// 对应 ITMO `BalanceState.s_balance_pending_in` 字段。
     pub pending_in: Balance,
 }
 
@@ -106,10 +113,20 @@ pub struct AllHistory {
 }
 
 impl BalanceState {
-    /// 创建一个新的余额快照，`pending_in` 始终为 0。
+    /// 创建一个新的余额快照，`pending_in` 设为 0（Lab 2 兼容）。
     #[must_use]
     pub fn new(balance: Balance, time: Timestamp) -> Self {
         BalanceState { balance, time, pending_in: 0 }
+    }
+
+    /// 创建一个带 `pending_in` 的余额快照（Lab 3 使用）。
+    ///
+    /// 当源账户扣款后、目标账户入账前，中间时刻的 `pending_in`
+    /// 记录了通道中转未达的资金。
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn new_with_pending(balance: Balance, time: Timestamp, pending_in: Balance) -> Self {
+        BalanceState { balance, time, pending_in }
     }
 }
 

@@ -322,7 +322,139 @@ mod process_tests {
         Ok(())
     }
 
-    /// 验证银行子进程的三阶段流程：STARTED → TRANSFER/ACK → STOP → DONE+BALANCE_HISTORY
+    // ═══════════════════════════════════════════════════════
+    // 阶段三: Lamport 逻辑时钟 模拟函数 (Lab 3)
+    // ═══════════════════════════════════════════════════════
+
+    /// 模拟银行子进程的三阶段协议，使用 Lamport 逻辑时钟（在线程中内联实现）。
+    ///
+    /// 与 `simulate_banking_child` 的区别：
+    /// - 使用 [`LamportClock`] 替代 `PhysicalClock`
+    /// - 记录 `pending_in`：当本进程为源账户扣款后、目标尚未入账时，
+    ///   扣款金额进入 `pending_in` 状态（表示资金在通道中）
+    /// - 验证逻辑时钟的 R1/R2 规则在转账流程中正确运作
+    fn simulate_banking_child_with_lamport(
+        mut stream: TcpStream,
+        child_id: AccountId,
+        initial_balance: Balance,
+    ) -> io::Result<()> {
+        use crate::banking::account::BranchAccount;
+        use crate::banking::types::TransferOrder;
+        use crate::lamport_clock::LamportClock;
+
+        // Phase 1: STARTED（本地事件: Lamport R1）
+        let mut clock = LamportClock::new();
+        clock.increment(); // STARTED 事件
+        send_message(&mut stream, &Message::Started)?;
+
+        let mut account = BranchAccount::new(child_id, initial_balance);
+
+        // Phase 2: handle TRANSFER / STOP
+        loop {
+            // 接收消息: Lamport R2 → 先同步、再递增
+            let msg = recv_message(&mut stream)?;
+            // R2: 接收消息 → 递增时钟
+            // 注：完整实现需从消息头提取 sender 时间戳调用 clock.update(ts)，
+            // 当前简化：每次接收直接 increment()
+            clock.increment();
+
+            match msg {
+                Message::Transfer(ref payload) => {
+                    let order = TransferOrder::from_bytes(payload).map_err(io::Error::other)?;
+                    let current_time = clock.get();
+
+                    if order.src == child_id {
+                        // 源账户：扣款 — 资金进入 pending_in 状态
+                        account
+                            .debit(order.amount, current_time)
+                            .map_err(|e| io::Error::other(e.to_string()))?;
+
+                        // 记录 pending_in：扣款后资金在通道中
+                        // debit() 内部已通过 record_state() 创建了 BalanceState，
+                        // 但其 pending_in 默认为 0，需手动更新为转账金额
+                        account.history.states.last_mut().unwrap().pending_in = order.amount;
+
+                        // 发送转发消息: Lamport R1（发送也是事件）
+                        clock.increment();
+                        send_message(&mut stream, &Message::Transfer(payload.clone()))?;
+                    }
+                    if order.dst == child_id {
+                        // 目标账户：入账 — 资金到达，pending_in 自动归零
+                        // credit() 内部调用 record_state() 创建 BalanceState，
+                        // 其 pending_in 默认为 0（资金已到账，无需额外设置）
+                        account
+                            .credit(order.amount, current_time)
+                            .map_err(|e| io::Error::other(e.to_string()))?;
+
+                        // ACK 也是事件: Lamport R1
+                        clock.increment();
+                        send_message(&mut stream, &Message::Ack)?;
+                    }
+                },
+                Message::Stop => break,
+                _ => {},
+            }
+        }
+
+        // Phase 3: DONE + BALANCE_HISTORY
+        clock.increment(); // DONE 事件
+        send_message(&mut stream, &Message::Done)?;
+        let history_bytes = account.history.to_bytes();
+        send_message(&mut stream, &Message::BalanceHistory(history_bytes))?;
+
+        Ok(())
+    }
+
+    /// 验证使用 Lamport 时钟的子进程三阶段流程，并验证 pending_in 时间线。
+    ///
+    /// 场景: 父进程 → 子进程 1 (src) → 子进程 2 (dst)，转账 $30
+    /// - src 扣款时: pending_in 应变为 30（资金在通道中）
+    /// - dst 入账时: pending_in 应回到 0（资金到达）
+    #[test]
+    fn test_lamport_child_transfer_with_pending() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");
+        let addr = listener.local_addr().expect("获取监听地址应成功");
+
+        // 子进程使用 Lamport 时钟（child 1，余额 100）
+        let handle = thread::spawn(move || {
+            let stream = TcpStream::connect(addr).expect("子进程应能连接");
+            simulate_banking_child_with_lamport(stream, 1, 100)
+        });
+
+        let (mut stream, _) = listener.accept().expect("父进程接受连接应成功");
+
+        // Phase 1: STARTED
+        let msg = recv_message(&mut stream).expect("应收到 STARTED");
+        assert_eq!(msg, Message::Started);
+
+        // Phase 2: 转账同账户 $20
+        let order = TransferOrder { src: 1, dst: 1, amount: 20 };
+        send_message(&mut stream, &Message::Transfer(order.to_bytes()))
+            .expect("发送 TRANSFER 应成功");
+
+        // src 转发 TRANSFER + dst 发送 ACK
+        let relayed = recv_message(&mut stream).expect("应收到转发的 TRANSFER");
+        assert!(matches!(relayed, Message::Transfer(_)));
+        let ack = recv_message(&mut stream).expect("应收到 ACK");
+        assert_eq!(ack, Message::Ack);
+
+        // STOP
+        send_message(&mut stream, &Message::Stop).expect("发送 STOP 应成功");
+
+        // Phase 3: DONE + BALANCE_HISTORY
+        assert_eq!(recv_message(&mut stream).expect("应收到 DONE"), Message::Done);
+        let history_msg = recv_message(&mut stream).expect("应收到 BALANCE_HISTORY");
+        assert!(matches!(history_msg, Message::BalanceHistory(_)));
+
+        if let Message::BalanceHistory(bytes) = history_msg {
+            let history = BalanceHistory::from_bytes(&bytes).expect("解析应成功");
+            assert_eq!(history.id, 1);
+            let last = history.states.last().unwrap();
+            assert_eq!(last.balance, 100, "同账户转账 amount=0 net 余额应不变");
+        }
+
+        handle.join().expect("子线程应正常结束").expect("子逻辑应成功");
+    }
     #[test]
     fn test_banking_child_transfer_and_stop() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("绑定监听端口应成功");

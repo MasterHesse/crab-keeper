@@ -5,3 +5,4 @@
 
 pub mod banking;
 pub mod communication;
+pub mod lamport_clock;
